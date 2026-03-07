@@ -83,7 +83,7 @@ func (c *Client) doPost(ctx context.Context, path string, body []byte) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

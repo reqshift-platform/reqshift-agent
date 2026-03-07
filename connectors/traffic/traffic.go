@@ -79,12 +79,12 @@ func (t *Connector) FetchTrafficEntries() ([]TrafficEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if t.lastOffset > 0 {
 		if _, err := file.Seek(t.lastOffset, 0); err != nil {
 			t.lastOffset = 0
-			file.Seek(0, 0)
+			_, _ = file.Seek(0, 0)
 		}
 	}
 

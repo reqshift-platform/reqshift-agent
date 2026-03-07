@@ -1,0 +1,36 @@
+# ════════════════════════════════════════════════════════
+# Reqshift Agent Configuration — Paris Datacenter
+# ════════════════════════════════════════════════════════
+#
+# Install:
+#   docker run -v ./agent.yaml:/etc/reqshift/agent.yaml reqshift/agent
+#
+# Or natively:
+#   reqshift-agent --config agent.yaml
+
+agent:
+  id: agent-paris-01
+  name: "Paris Datacenter"
+
+cloud:
+  endpoint: "${REQSHIFT_ENDPOINT}"   # e.g. https://ingest.reqshift.io
+  api-key: "${REQSHIFT_AGENT_KEY}"   # from API Keys page in the UI
+
+connectors:
+  # ── Primary APIM ──
+  - type: gravitee
+    name: "Gravitee Production"
+    url: "${GRAVITEE_URL}"           # e.g. http://gravitee-apim:8083
+    auth:
+      type: bearer
+      token: "${GRAVITEE_TOKEN}"
+    sync-interval: 5m
+    options:
+      environment: "DEFAULT"
+
+  # ── Local OpenAPI specs from CI/CD ──
+  - type: openapi
+    name: "CI/CD Specs"
+    sync-interval: 1m
+    options:
+      watch-dir: /opt/api-specs/

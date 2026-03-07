@@ -1,0 +1,23 @@
+# ════════════════════════════════════════════════════════
+# Reqshift Agent — Frankfurt Datacenter
+# ════════════════════════════════════════════════════════
+# Second agent for the same organization.
+# Both agents push to the same Reqshift tenant.
+# The UI aggregates APIs from both datacenters.
+
+agent:
+  id: agent-frankfurt-01
+  name: "Frankfurt Datacenter"
+
+cloud:
+  endpoint: "${REQSHIFT_ENDPOINT}"
+  api-key: "${REQSHIFT_AGENT_KEY}"   # same org key as Paris agent
+
+connectors:
+  - type: kong
+    name: "Kong Production"
+    url: "${KONG_ADMIN_URL}"         # e.g. http://kong:8001
+    auth:
+      type: apikey
+      token: "${KONG_ADMIN_TOKEN}"
+    sync-interval: 5m

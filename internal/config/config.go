@@ -13,11 +13,22 @@ type Config struct {
 	Agent      AgentConfig       `yaml:"agent"`
 	Cloud      CloudConfig       `yaml:"cloud"`
 	Connectors []ConnectorConfig `yaml:"connectors"`
+	Logging    LoggingConfig     `yaml:"logging"`
+	Server     ServerConfig      `yaml:"server"`
 }
 
 type AgentConfig struct {
-	ID   string `yaml:"id"`
-	Name string `yaml:"name"`
+	ID        string `yaml:"id"`
+	Name      string `yaml:"name"`
+	DeltaSync bool   `yaml:"delta-sync"`
+}
+
+type LoggingConfig struct {
+	Level string `yaml:"level"`
+}
+
+type ServerConfig struct {
+	Listen string `yaml:"listen"`
 }
 
 type CloudConfig struct {
@@ -64,6 +75,13 @@ func Load(path string) (*Config, error) {
 		if cfg.Connectors[i].SyncInterval == 0 {
 			cfg.Connectors[i].SyncInterval = 5 * time.Minute
 		}
+	}
+
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "info"
+	}
+	if cfg.Server.Listen == "" {
+		cfg.Server.Listen = ":8080"
 	}
 
 	return &cfg, nil

@@ -91,13 +91,9 @@ func TestDoSyncFetchSpecsError(t *testing.T) {
 	sched.doSync(context.Background(), mock)
 
 	snap := sched.health.Snapshot()
-	// The connector should still be in healthy state because push succeeded,
-	// which calls RecordSuccess at the end.
-	// Actually, RecordError is called on spec failure, then RecordSuccess at end.
-	// Let's just verify it doesn't panic and the final state is healthy
-	// (because push succeeded, RecordSuccess overrides).
-	if snap.ConnectorStatus["err-conn"] != string(models.StatusHealthy) {
-		t.Errorf("connector status = %q, want %q", snap.ConnectorStatus["err-conn"], models.StatusHealthy)
+	// Spec fetch failure records an error and returns early (no push).
+	if snap.ConnectorStatus["err-conn"] != string(models.StatusError) {
+		t.Errorf("connector status = %q, want %q", snap.ConnectorStatus["err-conn"], models.StatusError)
 	}
 }
 
@@ -159,6 +155,105 @@ func TestStartStopMultipleConnectors(t *testing.T) {
 	sched.Start()
 	time.Sleep(100 * time.Millisecond)
 	sched.Stop()
+}
+
+func TestDoSyncDeltaSkipsWhenNoChanges(t *testing.T) {
+	server := newSyncServer(t, 200)
+	defer server.Close()
+
+	mock := &mockConnector{
+		typeName: "mock",
+		name:     "delta-conn",
+		specs:    []models.APISpec{{APIID: "api-1", APIName: "Test", SpecContent: "content"}},
+	}
+
+	reg := connector.NewRegistry()
+	reg.Register(mock, 1*time.Hour)
+
+	cfg := &config.Config{
+		Agent: config.AgentConfig{ID: "test-agent", DeltaSync: true},
+		Cloud: config.CloudConfig{Endpoint: server.URL, APIKey: "key"},
+	}
+
+	p := push.NewClient(server.URL, "key", "test-agent", "test")
+	h := health.NewMonitor("test-agent")
+	t.Cleanup(h.Stop)
+
+	sched := New(reg, p, h, cfg, "test")
+
+	// First sync: full sync.
+	sched.doSync(context.Background(), mock)
+
+	snap := sched.health.Snapshot()
+	if snap.ConnectorStatus["delta-conn"] != string(models.StatusHealthy) {
+		t.Errorf("connector status = %q, want %q", snap.ConnectorStatus["delta-conn"], models.StatusHealthy)
+	}
+
+	// Second sync: no changes → should skip push.
+	sched.doSync(context.Background(), mock)
+	// Still healthy from first sync.
+	snap = sched.health.Snapshot()
+	if snap.ConnectorStatus["delta-conn"] != string(models.StatusHealthy) {
+		t.Errorf("connector status = %q, want %q after skip", snap.ConnectorStatus["delta-conn"], models.StatusHealthy)
+	}
+}
+
+func TestDoSyncDeltaDetectsChanges(t *testing.T) {
+	server := newSyncServer(t, 200)
+	defer server.Close()
+
+	mock := &mockConnector{
+		typeName: "mock",
+		name:     "delta-change",
+		specs:    []models.APISpec{{APIID: "api-1", APIName: "Test", SpecContent: "v1"}},
+	}
+
+	reg := connector.NewRegistry()
+	reg.Register(mock, 1*time.Hour)
+
+	cfg := &config.Config{
+		Agent: config.AgentConfig{ID: "test-agent", DeltaSync: true},
+		Cloud: config.CloudConfig{Endpoint: server.URL, APIKey: "key"},
+	}
+
+	p := push.NewClient(server.URL, "key", "test-agent", "test")
+	h := health.NewMonitor("test-agent")
+	t.Cleanup(h.Stop)
+
+	sched := New(reg, p, h, cfg, "test")
+
+	// First sync.
+	sched.doSync(context.Background(), mock)
+
+	// Modify spec.
+	mock.specs = []models.APISpec{{APIID: "api-1", APIName: "Test", SpecContent: "v2"}}
+	sched.doSync(context.Background(), mock)
+
+	snap := sched.health.Snapshot()
+	if snap.ConnectorStatus["delta-change"] != string(models.StatusHealthy) {
+		t.Errorf("connector status = %q, want %q", snap.ConnectorStatus["delta-change"], models.StatusHealthy)
+	}
+}
+
+func TestDoSyncMetricsFetchError(t *testing.T) {
+	server := newSyncServer(t, 200)
+	defer server.Close()
+
+	mock := &mockConnector{
+		typeName: "mock",
+		name:     "met-err",
+		specs:    []models.APISpec{{APIID: "api-1"}},
+		metErr:   fmt.Errorf("metrics unavailable"),
+	}
+
+	sched := newTestScheduler(t, mock, server.URL)
+	sched.doSync(context.Background(), mock)
+
+	// Push still succeeds when metrics fail.
+	snap := sched.health.Snapshot()
+	if snap.ConnectorStatus["met-err"] != string(models.StatusHealthy) {
+		t.Errorf("connector status = %q, want %q", snap.ConnectorStatus["met-err"], models.StatusHealthy)
+	}
 }
 
 // --- Test HTTP server ---

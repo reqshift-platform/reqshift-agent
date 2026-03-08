@@ -202,6 +202,137 @@ func TestLoadMalformedYAML(t *testing.T) {
 	}
 }
 
+func TestLoadLoggingConfig(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+logging:
+  level: debug
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("logging.level = %q, want %q", cfg.Logging.Level, "debug")
+	}
+}
+
+func TestLoadLoggingConfigDefault(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("logging.level = %q, want %q", cfg.Logging.Level, "info")
+	}
+}
+
+func TestLoadServerConfig(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+server:
+  listen: ":9090"
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Server.Listen != ":9090" {
+		t.Errorf("server.listen = %q, want %q", cfg.Server.Listen, ":9090")
+	}
+}
+
+func TestLoadServerConfigDefault(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Server.Listen != ":8080" {
+		t.Errorf("server.listen = %q, want %q", cfg.Server.Listen, ":8080")
+	}
+}
+
+func TestLoadDeltaSyncConfig(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+  delta-sync: true
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Agent.DeltaSync {
+		t.Error("expected delta-sync to be true")
+	}
+}
+
+func TestLoadDeltaSyncDefaultFalse(t *testing.T) {
+	yaml := `
+agent:
+  id: agent-01
+cloud:
+  endpoint: https://api.example.com
+  api-key: key
+connectors:
+  - type: openapi
+    name: specs
+    url: /tmp
+`
+	cfg, err := Load(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Agent.DeltaSync {
+		t.Error("expected delta-sync to default to false")
+	}
+}
+
 func TestLoadAuthConfig(t *testing.T) {
 	yaml := `
 agent:

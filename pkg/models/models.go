@@ -52,14 +52,16 @@ func DetectSpecFormat(content string) SpecFormat {
 
 // SyncPayload is the top-level payload sent to the Reqshift Ingestion API.
 type SyncPayload struct {
-	AgentID       string       `json:"agentId"`
-	AgentVersion  string       `json:"agentVersion"`
-	Timestamp     time.Time    `json:"timestamp"`
-	ConnectorType string       `json:"connectorType"`
-	ConnectorName string       `json:"connectorName"`
-	Specs         []APISpec    `json:"specs,omitempty"`
-	Metrics       []APIMetrics `json:"metrics,omitempty"`
-	Health        *AgentHealth `json:"health,omitempty"`
+	AgentID        string       `json:"agentId"`
+	AgentVersion   string       `json:"agentVersion"`
+	Timestamp      time.Time    `json:"timestamp"`
+	ConnectorType  string       `json:"connectorType"`
+	ConnectorName  string       `json:"connectorName"`
+	FullSync       bool         `json:"fullSync"`
+	Specs          []APISpec    `json:"specs,omitempty"`
+	DeletedSpecIDs []string     `json:"deletedSpecIds,omitempty"`
+	Metrics        []APIMetrics `json:"metrics,omitempty"`
+	Health         *AgentHealth `json:"health,omitempty"`
 }
 
 // APISpec represents a discovered API specification.

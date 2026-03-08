@@ -31,8 +31,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-      - run: go test -race -coverprofile=coverage.out ./...
-      - run: go tool cover -func=coverage.out
+      - name: Run unit tests
+        run: go test -race -coverprofile=unit.out -timeout 30s $(go list ./... | grep -v /tests)
+      - name: Run e2e tests
+        run: go test -race -coverprofile=e2e.out -timeout 120s ./tests/...
+      - name: Coverage report
+        run: |
+          go tool cover -func=unit.out
+          COVERAGE=$(go tool cover -func=unit.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 80) {print \"::error::Coverage ${COVERAGE}% is below 80%\"; exit 1} else {print \"Coverage OK\"}}"
 
   build:
     name: Build

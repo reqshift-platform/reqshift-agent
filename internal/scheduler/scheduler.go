@@ -77,8 +77,11 @@ func (s *Scheduler) syncLoop(conn connector.Connector, interval time.Duration) {
 	}
 }
 
+const syncTimeout = 2 * time.Minute
+
 func (s *Scheduler) doSync(conn connector.Connector) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	defer cancel()
 	start := time.Now()
 	logger := slog.With("connector", conn.Name(), "type", conn.Type())
 	logger.Info("sync starting")
@@ -131,11 +134,12 @@ func (s *Scheduler) heartbeatLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 			snapshot := s.health.Snapshot()
 			if err := s.pusher.PushHeartbeat(ctx, snapshot); err != nil {
 				slog.Error("heartbeat failed", "error", err)
 			}
+			cancel()
 		case <-s.stopCh:
 			return
 		}

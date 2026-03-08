@@ -82,7 +82,10 @@ func (t *Connector) FetchTrafficEntries() ([]TrafficEntry, error) {
 	defer func() { _ = file.Close() }()
 
 	if t.lastOffset > 0 {
-		if _, err := file.Seek(t.lastOffset, 0); err != nil {
+		// Detect log rotation: if file is smaller than last offset, reset.
+		if info, err := file.Stat(); err == nil && info.Size() < t.lastOffset {
+			t.lastOffset = 0
+		} else if _, err := file.Seek(t.lastOffset, 0); err != nil {
 			t.lastOffset = 0
 			_, _ = file.Seek(0, 0)
 		}

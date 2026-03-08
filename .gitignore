@@ -1,5 +1,5 @@
 # Binaries
-reqshift-agent
+/reqshift-agent
 *.exe
 *.dll
 *.so

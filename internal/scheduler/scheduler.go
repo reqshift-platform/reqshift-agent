@@ -28,7 +28,7 @@ type Scheduler struct {
 	health   *health.Monitor
 	cfg      *config.Config
 	version  string
-	stopCh   chan struct{}
+	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 }
 
@@ -40,29 +40,31 @@ func New(registry *connector.Registry, pusher *push.Client,
 		health:   healthMon,
 		cfg:      cfg,
 		version:  version,
-		stopCh:   make(chan struct{}),
 	}
 }
 
 func (s *Scheduler) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+
 	for _, entry := range s.registry.All() {
 		s.wg.Add(1)
-		go s.syncLoop(entry.Connector, entry.SyncInterval)
+		go s.syncLoop(ctx, entry.Connector, entry.SyncInterval)
 	}
 
 	s.wg.Add(1)
-	go s.heartbeatLoop()
+	go s.heartbeatLoop(ctx)
 }
 
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.cancel()
 	s.wg.Wait()
 }
 
-func (s *Scheduler) syncLoop(conn connector.Connector, interval time.Duration) {
+func (s *Scheduler) syncLoop(ctx context.Context, conn connector.Connector, interval time.Duration) {
 	defer s.wg.Done()
 
-	s.doSync(conn)
+	s.doSync(ctx, conn)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -70,8 +72,8 @@ func (s *Scheduler) syncLoop(conn connector.Connector, interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			s.doSync(conn)
-		case <-s.stopCh:
+			s.doSync(ctx, conn)
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -79,8 +81,8 @@ func (s *Scheduler) syncLoop(conn connector.Connector, interval time.Duration) {
 
 const syncTimeout = 2 * time.Minute
 
-func (s *Scheduler) doSync(conn connector.Connector) {
-	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+func (s *Scheduler) doSync(parentCtx context.Context, conn connector.Connector) {
+	ctx, cancel := context.WithTimeout(parentCtx, syncTimeout)
 	defer cancel()
 	start := time.Now()
 	logger := slog.With("connector", conn.Name(), "type", conn.Type())
@@ -94,17 +96,35 @@ func (s *Scheduler) doSync(conn connector.Connector) {
 		ConnectorName: conn.Name(),
 	}
 
-	specs, err := conn.FetchSpecs(ctx)
-	if err != nil {
-		logger.Error("fetch specs failed", "error", err)
-		s.health.RecordError(conn.Name(), err)
+	// Fetch specs and metrics concurrently.
+	var (
+		specs      []models.APISpec
+		specsErr   error
+		metrics    []models.APIMetrics
+		metricsErr error
+		wg         sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		specs, specsErr = conn.FetchSpecs(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		metrics, metricsErr = conn.FetchMetrics(ctx)
+	}()
+	wg.Wait()
+
+	if specsErr != nil {
+		logger.Error("fetch specs failed", "error", specsErr)
+		s.health.RecordError(conn.Name(), specsErr)
 	} else {
 		payload.Specs = specs
 	}
 
-	metrics, err := conn.FetchMetrics(ctx)
-	if err != nil {
-		logger.Error("fetch metrics failed", "error", err)
+	if metricsErr != nil {
+		logger.Error("fetch metrics failed", "error", metricsErr)
 	} else {
 		payload.Metrics = metrics
 	}
@@ -125,7 +145,7 @@ func (s *Scheduler) doSync(conn connector.Connector) {
 		"duration", time.Since(start))
 }
 
-func (s *Scheduler) heartbeatLoop() {
+func (s *Scheduler) heartbeatLoop(ctx context.Context) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(heartbeatInterval)
@@ -134,13 +154,13 @@ func (s *Scheduler) heartbeatLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+			hbCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			snapshot := s.health.Snapshot()
-			if err := s.pusher.PushHeartbeat(ctx, snapshot); err != nil {
+			if err := s.pusher.PushHeartbeat(hbCtx, snapshot); err != nil {
 				slog.Error("heartbeat failed", "error", err)
 			}
 			cancel()
-		case <-s.stopCh:
+		case <-ctx.Done():
 			return
 		}
 	}

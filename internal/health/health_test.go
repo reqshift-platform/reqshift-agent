@@ -10,6 +10,7 @@ import (
 
 func TestRecordSuccess(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	m.RecordSuccess("gravitee")
 
 	snap := m.Snapshot()
@@ -23,6 +24,7 @@ func TestRecordSuccess(t *testing.T) {
 
 func TestRecordSuccessClearsError(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 
 	m.RecordError("gravitee", fmt.Errorf("connection refused"))
 	snap := m.Snapshot()
@@ -42,6 +44,7 @@ func TestRecordSuccessClearsError(t *testing.T) {
 
 func TestRecordError(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	m.RecordError("kong", fmt.Errorf("timeout"))
 
 	snap := m.Snapshot()
@@ -55,6 +58,7 @@ func TestRecordError(t *testing.T) {
 
 func TestSnapshotHealthyWhenAllOK(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	m.RecordSuccess("gravitee")
 	m.RecordSuccess("kong")
 
@@ -66,6 +70,7 @@ func TestSnapshotHealthyWhenAllOK(t *testing.T) {
 
 func TestSnapshotDegradedIfAnyError(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	m.RecordSuccess("gravitee")
 	m.RecordError("kong", fmt.Errorf("down"))
 
@@ -77,6 +82,7 @@ func TestSnapshotDegradedIfAnyError(t *testing.T) {
 
 func TestSnapshotUptimeAndMemory(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	snap := m.Snapshot()
 
 	if snap.UptimeSeconds < 0 {
@@ -89,6 +95,7 @@ func TestSnapshotUptimeAndMemory(t *testing.T) {
 
 func TestSnapshotLastSyncAt(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	m.RecordSuccess("conn1")
 
 	snap := m.Snapshot()
@@ -99,6 +106,7 @@ func TestSnapshotLastSyncAt(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	m := NewMonitor("test-agent")
+	defer m.Stop()
 	var wg sync.WaitGroup
 
 	for i := 0; i < 100; i++ {

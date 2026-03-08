@@ -81,4 +81,5 @@ func main() {
 
 	slog.Info("shutting down")
 	sched.Stop()
+	healthMon.Stop()
 }

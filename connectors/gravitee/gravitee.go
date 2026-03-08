@@ -7,11 +7,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/reqshift-platform/reqshift-agent/internal/config"
 	"github.com/reqshift-platform/reqshift-agent/internal/connector"
 	"github.com/reqshift-platform/reqshift-agent/pkg/models"
+)
+
+const (
+	pageSize       = 100
+	maxConcurrency = 10
 )
 
 var _ connector.Connector = (*Connector)(nil)
@@ -48,47 +54,89 @@ func NewConnector(cfg config.ConnectorConfig) (connector.Connector, error) {
 func (g *Connector) Type() string { return "gravitee" }
 func (g *Connector) Name() string { return g.name }
 
+type apiEntry struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	APIVersion  string    `json:"apiVersion"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	ContextPath string    `json:"contextPath"`
+	Tags        []string  `json:"tags"`
+}
+
 func (g *Connector) FetchSpecs(ctx context.Context) ([]models.APISpec, error) {
-	url := fmt.Sprintf("%s/management/v2/environments/%s/apis?size=100", g.baseURL, g.envID)
-	body, err := g.doRequest(ctx, url)
-	if err != nil {
-		return nil, fmt.Errorf("list APIs: %w", err)
-	}
-
-	var listResp struct {
-		Data []struct {
-			ID          string    `json:"id"`
-			Name        string    `json:"name"`
-			APIVersion  string    `json:"apiVersion"`
-			UpdatedAt   time.Time `json:"updatedAt"`
-			ContextPath string    `json:"contextPath"`
-			Tags        []string  `json:"tags"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &listResp); err != nil {
-		return nil, fmt.Errorf("parse API list: %w", err)
-	}
-
-	var specs []models.APISpec
-	for _, api := range listResp.Data {
-		specURL := fmt.Sprintf("%s/management/v2/environments/%s/apis/%s/definition",
-			g.baseURL, g.envID, api.ID)
-		specBody, err := g.doRequest(ctx, specURL)
+	// Paginate through all APIs.
+	var allAPIs []apiEntry
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/management/v2/environments/%s/apis?size=%d&page=%d",
+			g.baseURL, g.envID, pageSize, page)
+		body, err := g.doRequest(ctx, url)
 		if err != nil {
-			slog.Warn("skipping API spec", "apiId", api.ID, "error", err)
-			continue
+			return nil, fmt.Errorf("list APIs (page %d): %w", page, err)
 		}
 
-		specs = append(specs, models.APISpec{
-			APIID:        api.ID,
-			APIName:      api.Name,
-			Version:      api.APIVersion,
-			BasePath:     api.ContextPath,
-			SpecFormat:   models.DetectSpecFormat(string(specBody)),
-			SpecContent:  string(specBody),
-			Tags:         api.Tags,
-			LastModified: api.UpdatedAt,
-		})
+		var listResp struct {
+			Data []apiEntry `json:"data"`
+		}
+		if err := json.Unmarshal(body, &listResp); err != nil {
+			return nil, fmt.Errorf("parse API list: %w", err)
+		}
+
+		allAPIs = append(allAPIs, listResp.Data...)
+		if len(listResp.Data) < pageSize {
+			break
+		}
+	}
+
+	// Fetch definitions concurrently with bounded concurrency.
+	type specResult struct {
+		index int
+		spec  models.APISpec
+		ok    bool
+	}
+
+	results := make([]specResult, len(allAPIs))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i, api := range allAPIs {
+		wg.Add(1)
+		go func(idx int, api apiEntry) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			specURL := fmt.Sprintf("%s/management/v2/environments/%s/apis/%s/definition",
+				g.baseURL, g.envID, api.ID)
+			specBody, err := g.doRequest(ctx, specURL)
+			if err != nil {
+				slog.Warn("skipping API spec", "apiId", api.ID, "error", err)
+				return
+			}
+
+			results[idx] = specResult{
+				index: idx,
+				ok:    true,
+				spec: models.APISpec{
+					APIID:        api.ID,
+					APIName:      api.Name,
+					Version:      api.APIVersion,
+					BasePath:     api.ContextPath,
+					SpecFormat:   models.DetectSpecFormat(string(specBody)),
+					SpecContent:  string(specBody),
+					Tags:         api.Tags,
+					LastModified: api.UpdatedAt,
+				},
+			}
+		}(i, api)
+	}
+	wg.Wait()
+
+	// Collect results in original order.
+	specs := make([]models.APISpec, 0, len(allAPIs))
+	for _, r := range results {
+		if r.ok {
+			specs = append(specs, r.spec)
+		}
 	}
 
 	return specs, nil

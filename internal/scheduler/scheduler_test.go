@@ -50,6 +50,7 @@ func newTestScheduler(t *testing.T, mock *mockConnector, pusherURL string) *Sche
 
 	p := push.NewClient(pusherURL, "key", "test-agent", "test")
 	h := health.NewMonitor("test-agent")
+	t.Cleanup(h.Stop)
 
 	return New(reg, p, h, cfg, "test")
 }
@@ -67,7 +68,7 @@ func TestDoSyncSuccess(t *testing.T) {
 
 	sched := newTestScheduler(t, mock, server.URL)
 	// doSync should not panic and should work end-to-end
-	sched.doSync(mock)
+	sched.doSync(context.Background(), mock)
 
 	// Verify health was recorded as success
 	snap := sched.health.Snapshot()
@@ -87,7 +88,7 @@ func TestDoSyncFetchSpecsError(t *testing.T) {
 	}
 
 	sched := newTestScheduler(t, mock, server.URL)
-	sched.doSync(mock)
+	sched.doSync(context.Background(), mock)
 
 	snap := sched.health.Snapshot()
 	// The connector should still be in healthy state because push succeeded,
@@ -111,7 +112,7 @@ func TestDoSyncPushError(t *testing.T) {
 	}
 
 	sched := newTestScheduler(t, mock, server.URL)
-	sched.doSync(mock)
+	sched.doSync(context.Background(), mock)
 
 	snap := sched.health.Snapshot()
 	// Cloud push failed => RecordError("cloud", ...)
@@ -152,6 +153,7 @@ func TestStartStopMultipleConnectors(t *testing.T) {
 	}
 	p := push.NewClient(server.URL, "key", "test-agent", "test")
 	h := health.NewMonitor("test-agent")
+	defer h.Stop()
 	sched := New(reg, p, h, cfg, "test")
 
 	sched.Start()

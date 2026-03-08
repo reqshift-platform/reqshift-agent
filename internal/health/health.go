@@ -3,10 +3,13 @@ package health
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/reqshift-platform/reqshift-agent/pkg/models"
 )
+
+const memStatsInterval = 10 * time.Second
 
 // Monitor tracks the agent's own health and per-connector status.
 type Monitor struct {
@@ -17,15 +20,47 @@ type Monitor struct {
 	connectorStatus map[string]models.HealthStatus
 	connectorErrors map[string]string
 	lastSyncAt      time.Time
+
+	cachedAllocMB atomic.Int64
+	stopMem       chan struct{}
 }
 
 func NewMonitor(agentID string) *Monitor {
-	return &Monitor{
+	m := &Monitor{
 		agentID:         agentID,
 		startedAt:       time.Now(),
 		connectorStatus: make(map[string]models.HealthStatus),
 		connectorErrors: make(map[string]string),
+		stopMem:         make(chan struct{}),
 	}
+
+	// Seed initial value.
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	m.cachedAllocMB.Store(int64(ms.Alloc / 1024 / 1024))
+
+	go m.refreshMemStats()
+	return m
+}
+
+func (m *Monitor) refreshMemStats() {
+	ticker := time.NewTicker(memStatsInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			var ms runtime.MemStats
+			runtime.ReadMemStats(&ms)
+			m.cachedAllocMB.Store(int64(ms.Alloc / 1024 / 1024))
+		case <-m.stopMem:
+			return
+		}
+	}
+}
+
+// Stop shuts down the background mem-stats goroutine.
+func (m *Monitor) Stop() {
+	close(m.stopMem)
 }
 
 // RecordSuccess marks a connector as healthy.
@@ -50,9 +85,6 @@ func (m *Monitor) Snapshot() *models.AgentHealth {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
 	status := models.StatusHealthy
 	var lastError string
 	for _, s := range m.connectorStatus {
@@ -76,7 +108,7 @@ func (m *Monitor) Snapshot() *models.AgentHealth {
 	return &models.AgentHealth{
 		Status:          status,
 		UptimeSeconds:   int64(time.Since(m.startedAt).Seconds()),
-		MemoryUsedMB:    int64(memStats.Alloc / 1024 / 1024),
+		MemoryUsedMB:    m.cachedAllocMB.Load(),
 		LastSyncAt:      m.lastSyncAt,
 		LastError:       lastError,
 		ConnectorStatus: connStatus,

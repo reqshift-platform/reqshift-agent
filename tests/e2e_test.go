@@ -139,6 +139,7 @@ func newOpenAPIPipeline(t *testing.T, cloudURL, agentID, connName, specDir strin
 
 	pusher := push.NewClient(cloudURL, "key", agentID, "test")
 	mon := health.NewMonitor(agentID)
+	t.Cleanup(mon.Stop)
 	sched := scheduler.New(reg, pusher, mon, cfg, "test")
 
 	return &e2ePipeline{scheduler: sched, monitor: mon}
@@ -203,6 +204,7 @@ paths:
 	}
 	pusher := push.NewClient(cloud.URL, "e2e-key", "e2e-agent", "1.0.0-test")
 	mon := health.NewMonitor("e2e-agent")
+	defer mon.Stop()
 	sched := scheduler.New(reg, pusher, mon, cfg, "1.0.0-test")
 
 	sched.Start()
@@ -436,6 +438,7 @@ func TestE2E_TrafficLogsSync(t *testing.T) {
 
 	pusher := push.NewClient(cloud.URL, "key", "traffic-agent", "test")
 	mon := health.NewMonitor("traffic-agent")
+	defer mon.Stop()
 	sched := scheduler.New(reg, pusher, mon, cfg, "test")
 
 	sched.Start()
